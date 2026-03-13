@@ -1,5 +1,8 @@
 package com.fotolicht.app
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,11 +27,16 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -59,6 +67,17 @@ private fun LightScreen() {
     var hue by remember { mutableFloatStateOf(48f) }
     var brightness by remember { mutableFloatStateOf(1f) }
     var showControls by remember { mutableStateOf(false) }
+    val brightnessController = rememberBrightnessController()
+
+    LaunchedEffect(brightness) {
+        brightnessController.setScreenBrightness(brightness)
+    }
+
+    DisposableEffect(brightnessController) {
+        onDispose {
+            brightnessController.restore()
+        }
+    }
 
     val activeColor = Color.hsv(
         hue = hue,
@@ -233,6 +252,56 @@ private fun HueSlider(
 private fun FotolichtTheme(content: @Composable () -> Unit) {
     MaterialTheme(content = content)
 }
+
+@Stable
+private class BrightnessController(
+    private val setBrightness: (Float) -> Unit,
+    private val restoreBrightness: () -> Unit
+) {
+    fun setScreenBrightness(value: Float) {
+        setBrightness(value.coerceIn(0f, 1f))
+    }
+
+    fun restore() {
+        restoreBrightness()
+    }
+}
+
+@Composable
+private fun rememberBrightnessController(): BrightnessController {
+    if (LocalInspectionMode.current) {
+        return remember {
+            BrightnessController(
+                setBrightness = {},
+                restoreBrightness = {}
+            )
+        }
+    }
+
+    val activity = LocalContext.current.findActivity()
+    return remember(activity) {
+        val originalBrightness = activity.window.attributes.screenBrightness
+        BrightnessController(
+            setBrightness = { value ->
+                val params = activity.window.attributes
+                params.screenBrightness = value
+                activity.window.attributes = params
+            },
+            restoreBrightness = {
+                val params = activity.window.attributes
+                params.screenBrightness = originalBrightness
+                activity.window.attributes = params
+            }
+        )
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity =
+    when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> error("Unable to find Activity from context")
+    }
 
 @Preview(showBackground = true)
 @Composable
